@@ -12,55 +12,14 @@ const app = express();
 const port = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// 🧠 MongoDB User Schema
+// ✅ MongoDB Models
 const User = mongoose.model("user", {
   username: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  role: { type: String, default: "user" }
+  role: { type: String, default: "user" },
 });
 
-// 🛡️ Middleware
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'https://project-epax.vercel.app'
-  ],
-  credentials: true,
-}));
-
-// 🔌 MongoDB connection
-mongoose.connect(process.env.MONGO_URL)
-  .then(() => console.log("MongoDB Connected"))
-  .catch(err => console.error("MongoDB Error:", err.message));
-
-// 📂 Multer image upload config
-const storage = multer.diskStorage({
-  destination: './upload/images',
-  filename: (req, file, cb) => {
-    cb(null, `${file.fieldname}_${Date.now()}${path.extname(file.originalname)}`);
-  }
-});
-const upload = multer({ storage });
-
-// 🖼️ Static files
-app.use('/images', express.static('upload/images'));
-
-// 📤 Upload endpoint
-app.post("/upload", upload.single('product'), (req, res) => {
-  res.json({
-    success: 1,
-    image_url: `http://localhost:${port}/images/${req.file.filename}`
-  });
-});
-
-// 🌐 Basic route
-app.get("/", (req, res) => {
-  res.send("Express App is Running");
-});
-
-// 📦 Product schema
 const Product = mongoose.model("product", {
   id: { type: Number, required: true },
   name: { type: String, required: true },
@@ -72,7 +31,46 @@ const Product = mongoose.model("product", {
   available: { type: Boolean, default: true },
 });
 
-// ➕ Add product
+// 🌐 Middleware
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://project-epax.vercel.app'
+  ],
+  credentials: true,
+}));
+app.use(express.json());
+app.use('/images', express.static('upload/images'));
+
+// 🔌 Connect to MongoDB
+mongoose.connect(process.env.MONGO_URL)
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch(err => console.error("❌ MongoDB Error:", err.message));
+
+// 📂 Image Upload (Multer)
+const storage = multer.diskStorage({
+  destination: './upload/images',
+  filename: (req, file, cb) => {
+    cb(null, `${file.fieldname}_${Date.now()}${path.extname(file.originalname)}`);
+  }
+});
+const upload = multer({ storage });
+
+// 📤 Upload endpoint
+app.post("/upload", upload.single('product'), (req, res) => {
+  res.json({
+    success: 1,
+    image_url: `http://localhost:${port}/images/${req.file.filename}`
+  });
+});
+
+// 🏠 Root
+app.get("/", (req, res) => {
+  res.send("✅ Server Running");
+});
+
+// ➕ Add Product
 app.post('/addproduct', async (req, res) => {
   const products = await Product.find({});
   const id = products.length > 0 ? products[products.length - 1].id + 1 : 1;
@@ -90,13 +88,13 @@ app.post('/addproduct', async (req, res) => {
   res.json({ success: true, name: req.body.name });
 });
 
-// ❌ Remove product
+// ❌ Remove Product
 app.post('/removeproduct', async (req, res) => {
   await Product.findOneAndDelete({ id: req.body.id });
-  res.json({ success: true, name: req.body.name });
+  res.json({ success: true });
 });
 
-// 📃 Get all products
+// 📦 Get All Products
 app.get('/allproducts', async (req, res) => {
   const products = await Product.find({});
   res.send(products);
@@ -104,7 +102,7 @@ app.get('/allproducts', async (req, res) => {
 
 // 📝 Signup
 app.post("/signup", async (req, res) => {
-  const { username, email, password, role } = req.body;
+  const { username, email, password } = req.body;
 
   if (!username || !email || !password) {
     return res.status(400).json({ success: false, message: "All fields are required" });
@@ -116,7 +114,7 @@ app.post("/signup", async (req, res) => {
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-  const newUser = new User({ username, email, password: hashedPassword, role });
+  const newUser = new User({ username, email, password: hashedPassword });
   await newUser.save();
 
   res.json({ success: true, message: "User registered successfully" });
@@ -132,16 +130,16 @@ app.post("/login", async (req, res) => {
 
   const user = await User.findOne({ email });
   if (!user) {
-    return res.status(400).json({ success: false, errors: "Wrong Email Id" });
+    return res.status(400).json({ success: false, message: "Invalid email" });
   }
 
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) {
-    return res.status(400).json({ success: false, errors: "Wrong Password" });
+    return res.status(400).json({ success: false, message: "Invalid password" });
   }
 
   const token = jwt.sign(
-    { username: user.username, email: user.email, role: user.role },
+    { username: user.username, email: user.email },
     JWT_SECRET,
     { expiresIn: "1h" }
   );
@@ -150,10 +148,6 @@ app.post("/login", async (req, res) => {
 });
 
 // ▶️ Start server
-app.listen(port, (error) => {
-  if (!error) {
-    console.log("Server Running on Port " + port);
-  } else {
-    console.log("Error: " + error);
-  }
+app.listen(port, () => {
+  console.log(`🚀 Server running on http://localhost:${port}`);
 });
