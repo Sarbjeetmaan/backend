@@ -40,7 +40,9 @@ app.use(cors({
     'http://localhost:5173',
     'http://localhost:5174',
     'http://localhost:3000',
-    'https://project-epax.vercel.app'
+    'https://project-epax.vercel.app',
+    'https://project-3v49.vercel.app',
+    'https://admin-68ww.vercel.app'
   ],
   credentials: true,
 }));
