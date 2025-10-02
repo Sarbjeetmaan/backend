@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config()   
 const express = require("express");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
@@ -43,6 +43,7 @@ app.use(cors({
     'https://project-epax.vercel.app',
     'https://project-3v49.vercel.app',
     'https://admin-68ww.vercel.app'
+  
   ],
   credentials: true,
 }));
@@ -59,6 +60,28 @@ const storage = multer.diskStorage({
   }
 });
 const upload = multer({ storage });
+
+// =======================
+// JWT Auth Middleware
+// =======================
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+  if (!token) return res.status(401).json({ success: false, message: "No token provided" });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ success: false, message: "Invalid token" });
+    req.user = user;
+    next();
+  });
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ success: false, message: "Admin access required" });
+  }
+  next();
+}
 
 // =======================
 // Routes
@@ -82,7 +105,7 @@ app.post('/addproduct', async (req, res) => {
     const product = new Product({
       id,
       name: req.body.name,
-      images: req.body.images, // array of image URLs
+      images: req.body.images,
       category: req.body.category,
       new_price: req.body.new_price,
       old_price: req.body.old_price,
@@ -120,7 +143,7 @@ app.get('/allproducts', async (req, res) => {
 // Auth Routes
 // =======================
 
-// Signup
+// Signup (always role=user by default)
 app.post("/signup", async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -134,11 +157,7 @@ app.post("/signup", async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // 👇 Example: make a specific email admin
-    const role = email === "admin@example.com" ? "admin" : "user";
-
-    const newUser = new User({ username, email, password: hashedPassword, role });
+    const newUser = new User({ username, email, password: hashedPassword, role: "user" });
     await newUser.save();
 
     res.json({ success: true, message: "User registered successfully" });
@@ -166,7 +185,6 @@ app.post("/login", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid password" });
     }
 
-    // Include role in JWT
     const token = jwt.sign(
       { username: user.username, email: user.email, role: user.role },
       JWT_SECRET,
@@ -176,11 +194,31 @@ app.post("/login", async (req, res) => {
     res.json({
       success: true,
       token,
-      role: user.role, // 👈 send role to frontend
+      role: user.role,
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false });
+  }
+});
+
+// =======================
+// Admin-only Route
+// =======================
+app.post("/makeadmin", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { email } = req.body;
+    const updated = await User.findOneAndUpdate(
+      { email },
+      { role: "admin" },
+      { new: true }
+    );
+
+    if (!updated) return res.status(404).json({ success: false, message: "User not found" });
+
+    res.json({ success: true, message: `${email} is now an admin`, user: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
