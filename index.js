@@ -82,13 +82,18 @@ function requireAdmin(req, res, next) {
 // =======================
 // Routes
 // =======================
-app.get("/", (req, res) => res.send("✅ Server Running"));
-
 app.post("/upload", upload.array('product', 10), (req, res) => {
-  
-  const BASE_URL = process.env.BASE_URL || `https://backend-91e3.onrender.com`;
+  // ✅ Detect production or local environment dynamically
+  const BASE_URL =
+    process.env.BASE_URL ||
+    (process.env.NODE_ENV === "production"
+      ? "https://backend-91e3.onrender.com"
+      : `http://localhost:${port}`);
 
-  const imageUrls = req.files.map(file => `${BASE_URL}/images/${file.filename}`);
+  // ✅ Build proper URLs for images
+  const imageUrls = req.files.map(
+    (file) => `${BASE_URL}/images/${file.filename}`
+  );
 
   res.json({ success: 1, image_urls: imageUrls });
 });
