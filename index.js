@@ -85,9 +85,14 @@ function requireAdmin(req, res, next) {
 app.get("/", (req, res) => res.send("✅ Server Running"));
 
 app.post("/upload", upload.array('product', 10), (req, res) => {
-  const imageUrls = req.files.map(file => `http://localhost:${port}/images/${file.filename}`);
+  
+  const BASE_URL = process.env.BASE_URL || `https://backend-91e3.onrender.com`;
+
+  const imageUrls = req.files.map(file => `${BASE_URL}/images/${file.filename}`);
+
   res.json({ success: 1, image_urls: imageUrls });
 });
+
 
 app.post('/addproduct', async (req, res) => {
   try {
