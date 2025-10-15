@@ -216,6 +216,9 @@ mongoose.connect(process.env.MONGO_URL)
 // =======================
 // Start Server
 // =======================
+app.get("/", (req, res) => {
+  res.send("✅ API is running successfully on Render!");
+});
 app.listen(port, () => {
   console.log(`🚀 Server running on http://localhost:${port}`);
 });
