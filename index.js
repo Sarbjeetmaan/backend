@@ -31,6 +31,7 @@ const Product = mongoose.model("product", {
   date: { type: Date, default: Date.now },
   available: { type: Boolean, default: true },
 });
+
 const Cart = mongoose.model("cart", {
   email: { type: String, required: true },
   items: { type: Map, of: Number, default: {} },
@@ -43,7 +44,7 @@ app.use(cors({
   origin: [
     'http://localhost:5173',
     'https://project-3v49.vercel.app',
-    'https://admin-68ww.vercel.app', // admin frontend
+    'https://admin-68ww.vercel.app',
   ],
   credentials: true,
 }));
@@ -62,7 +63,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // =======================
-// JWT Auth Middleware
+// JWT Middleware
 // =======================
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
@@ -86,35 +87,36 @@ function requireAdmin(req, res, next) {
 // =======================
 // Routes
 // =======================
+
+// Upload images
 app.post("/upload", upload.array('product', 10), (req, res) => {
-  // Detect production or local environment dynamically
   const BASE_URL =
     process.env.BASE_URL ||
     (process.env.NODE_ENV === "production"
       ? "https://backend-91e3.onrender.com"
       : `http://localhost:${port}`);
 
-  //  Build proper URLs for images
-  const imageUrls = req.files.map(
-    (file) => `${BASE_URL}/images/${file.filename}`
-  );
-
+  const imageUrls = req.files.map(file => `${BASE_URL}/images/${file.filename}`);
   res.json({ success: 1, image_urls: imageUrls });
 });
 
-
+// Add product (IDs start from 7000)
 app.post('/addproduct', async (req, res) => {
   try {
-    const products = await Product.find({});
-    const id = products.length > 0 ? products[products.length - 1].id + 1 : 1;
+    const lastProduct = await Product.findOne({}).sort({ id: -1 });
+    const newId = lastProduct ? lastProduct.id + 1 : 7000;
+
+    const imagesArray = Array.isArray(req.body.images) ? req.body.images : [req.body.images];
+
     const product = new Product({
-      id,
+      id: newId,
       name: req.body.name,
-      images: req.body.images,
+      images: imagesArray,
       category: req.body.category,
       new_price: req.body.new_price,
       old_price: req.body.old_price,
     });
+
     await product.save();
     res.json({ success: true, product });
   } catch (err) {
@@ -123,6 +125,7 @@ app.post('/addproduct', async (req, res) => {
   }
 });
 
+// Remove product
 app.post('/removeproduct', async (req, res) => {
   try {
     await Product.findOneAndDelete({ id: req.body.id });
@@ -132,31 +135,30 @@ app.post('/removeproduct', async (req, res) => {
   }
 });
 
+// Get all products (sorted newest first)
 app.get('/allproducts', async (req, res) => {
   try {
-    const products = await Product.find({});
+    const products = await Product.find({}).sort({ date: -1 });
     res.json(products);
   } catch (err) {
     res.status(500).json({ success: false });
   }
 });
 
-// =======================
-// Auth Routes
-// =======================
+// ---------------- Auth Routes ----------------
 app.post("/signup", async (req, res) => {
   try {
     const { username, email, password } = req.body;
-    if (!username || !email || !password) {
+    if (!username || !email || !password)
       return res.status(400).json({ success: false, message: "All fields are required" });
-    }
+
     const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ success: false, message: "Email already exists" });
+    if (existingUser)
+      return res.status(400).json({ success: false, message: "Email already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = new User({ username, email, password: hashedPassword, role: "user" });
+    const newUser = new User({ username, email, password: hashedPassword });
     await newUser.save();
-
     res.json({ success: true, message: "User registered successfully" });
   } catch (err) {
     console.error(err);
@@ -167,7 +169,8 @@ app.post("/signup", async (req, res) => {
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ success: false, message: "Email and password required" });
+    if (!email || !password)
+      return res.status(400).json({ success: false, message: "Email and password required" });
 
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ success: false, message: "Invalid email" });
@@ -176,28 +179,23 @@ app.post("/login", async (req, res) => {
     if (!isMatch) return res.status(400).json({ success: false, message: "Invalid password" });
 
     const token = jwt.sign({ username: user.username, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: "1h" });
-
     res.json({ success: true, token, role: user.role });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false });
   }
 });
-// =======================
-// CART ROUTES
-// =======================
 
+// ---------------- Cart Routes ----------------
 app.post("/savecart", authenticateToken, async (req, res) => {
   try {
     const email = req.user.email;
     const { cartItems } = req.body;
-
     await Cart.findOneAndUpdate(
       { email },
       { items: cartItems },
       { upsert: true, new: true }
     );
-
     res.json({ success: true, message: "Cart saved successfully" });
   } catch (err) {
     console.error(err);
@@ -216,45 +214,27 @@ app.get("/getcart", authenticateToken, async (req, res) => {
   }
 });
 
-// =======================
-// Admin-only Route
-// =======================
+// ---------------- Admin Routes ----------------
 app.post("/makeadmin", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { email } = req.body;
     const updated = await User.findOneAndUpdate({ email }, { role: "admin" }, { new: true });
     if (!updated) return res.status(404).json({ success: false, message: "User not found" });
-
     res.json({ success: true, message: `${email} is now an admin`, user: updated });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-// =======================
-// Verify Admin Route
-// =======================
 app.get("/verifyAdmin", authenticateToken, (req, res) => {
-  if (req.user.role === "admin") {
-    return res.json({ isAdmin: true });
-  } else {
-    return res.json({ isAdmin: false });
-  }
+  res.json({ isAdmin: req.user.role === "admin" });
 });
 
-// =======================
-// MongoDB Connection
-// =======================
+// ---------------- MongoDB ----------------
 mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch(err => console.error("❌ MongoDB Error:", err.message));
 
-// =======================
-// Start Server
-// =======================
-app.get("/", (req, res) => {
-  res.send("✅ API is running successfully on Render!");
-});
-app.listen(port, () => {
-  console.log(`🚀 Server running on http://localhost:${port}`);
-});
+// ---------------- Start Server ----------------
+app.get("/", (req, res) => res.send("✅ API is running successfully!"));
+app.listen(port, () => console.log(`🚀 Server running on http://localhost:${port}`));
