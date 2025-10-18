@@ -31,6 +31,10 @@ const Product = mongoose.model("product", {
   date: { type: Date, default: Date.now },
   available: { type: Boolean, default: true },
 });
+const Cart = mongoose.model("cart", {
+  email: { type: String, required: true },
+  items: { type: Map, of: Number, default: {} },
+});
 
 // =======================
 // Middleware
@@ -83,14 +87,14 @@ function requireAdmin(req, res, next) {
 // Routes
 // =======================
 app.post("/upload", upload.array('product', 10), (req, res) => {
-  // ✅ Detect production or local environment dynamically
+  // Detect production or local environment dynamically
   const BASE_URL =
     process.env.BASE_URL ||
     (process.env.NODE_ENV === "production"
       ? "https://backend-91e3.onrender.com"
       : `http://localhost:${port}`);
 
-  // ✅ Build proper URLs for images
+  //  Build proper URLs for images
   const imageUrls = req.files.map(
     (file) => `${BASE_URL}/images/${file.filename}`
   );
@@ -177,6 +181,38 @@ app.post("/login", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false });
+  }
+});
+// =======================
+// CART ROUTES
+// =======================
+
+app.post("/savecart", authenticateToken, async (req, res) => {
+  try {
+    const email = req.user.email;
+    const { cartItems } = req.body;
+
+    await Cart.findOneAndUpdate(
+      { email },
+      { items: cartItems },
+      { upsert: true, new: true }
+    );
+
+    res.json({ success: true, message: "Cart saved successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Error saving cart" });
+  }
+});
+
+app.get("/getcart", authenticateToken, async (req, res) => {
+  try {
+    const email = req.user.email;
+    const userCart = await Cart.findOne({ email });
+    res.json({ success: true, cart: userCart?.items || {} });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Error loading cart" });
   }
 });
 
