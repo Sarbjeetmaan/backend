@@ -13,7 +13,7 @@ const app = express();
 const port = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// =======================
+
 // MongoDB Models
 // =======================
 const User = mongoose.model("user", {
