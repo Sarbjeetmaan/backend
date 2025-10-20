@@ -3,17 +3,15 @@ const express = require("express");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
-const path = require("path");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const cloudinary = require("cloudinary").v2;
-const fs = require("fs");
 
 const app = express();
 const port = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET;
 
-
+// =======================
 // MongoDB Models
 // =======================
 const User = mongoose.model("user", {
@@ -26,7 +24,7 @@ const User = mongoose.model("user", {
 const Product = mongoose.model("product", {
   id: { type: Number, required: true, unique: true },
   name: { type: String, required: true },
-  images: [{ type: String, required: true }], // Cloudinary URLs
+  images: [{ type: String, required: true }],
   category: { type: String, required: true },
   new_price: { type: Number, required: true },
   old_price: { type: Number, required: true },
@@ -55,17 +53,9 @@ app.use(
 app.use(express.json());
 
 // =======================
-// Multer Setup
+// Multer (memory storage)
 // =======================
-const storage = multer.diskStorage({
-  destination: "./upload/images",
-  filename: (req, file, cb) => {
-    cb(
-      null,
-      `${file.fieldname}_${Date.now()}${path.extname(file.originalname)}`
-    );
-  },
-});
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 // =======================
@@ -83,8 +73,7 @@ cloudinary.config({
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
-  if (!token)
-    return res.status(401).json({ success: false, message: "No token provided" });
+  if (!token) return res.status(401).json({ success: false, message: "No token provided" });
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ success: false, message: "Invalid token" });
@@ -104,7 +93,7 @@ function requireAdmin(req, res, next) {
 // Routes
 // =======================
 
-// Upload images to Cloudinary
+// Upload images directly from memory to Cloudinary
 app.post("/upload", upload.array("product", 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0)
@@ -113,24 +102,33 @@ app.post("/upload", upload.array("product", 10), async (req, res) => {
     const imageUrls = [];
 
     for (const file of req.files) {
-      const result = await cloudinary.uploader.upload(file.path, { folder: "products" });
+      const result = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: "products" },
+          (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          }
+        );
+        stream.end(file.buffer);
+      });
+
       imageUrls.push(result.secure_url);
-      fs.unlinkSync(file.path); // remove local file
     }
 
     res.json({ success: true, image_urls: imageUrls });
   } catch (err) {
     console.error("Upload Error:", err);
-    res.status(500).json({ success: false, message: "Upload failed" });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
 // Add product (admin only)
 app.post("/addproduct", authenticateToken, requireAdmin, async (req, res) => {
+  console.log("Add Product Body:", req.body); // For debugging
   try {
     const { name, images, category, new_price, old_price } = req.body;
 
-    // Validation
     if (!name || !images || images.length === 0 || !category || !new_price || !old_price) {
       return res.status(400).json({ success: false, message: "All product fields are required" });
     }
@@ -138,18 +136,17 @@ app.post("/addproduct", authenticateToken, requireAdmin, async (req, res) => {
     const lastProduct = await Product.findOne({}).sort({ id: -1 });
     const newId = lastProduct ? lastProduct.id + 1 : 7000;
 
-    const imagesArray = Array.isArray(images) ? images : [images];
-
     const product = new Product({
       id: newId,
       name,
-      images: imagesArray,
+      images: Array.isArray(images) ? images : [images],
       category,
       new_price: Number(new_price),
       old_price: Number(old_price),
     });
 
     await product.save();
+    console.log("Product saved:", product);
     res.json({ success: true, product });
   } catch (err) {
     console.error("Add Product Error:", err);
