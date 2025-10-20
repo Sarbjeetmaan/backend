@@ -1,4 +1,4 @@
-require('dotenv').config();
+require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
@@ -6,6 +6,8 @@ const multer = require("multer");
 const path = require("path");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
+const cloudinary = require("cloudinary").v2;
+const fs = require("fs");
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -22,9 +24,9 @@ const User = mongoose.model("user", {
 });
 
 const Product = mongoose.model("product", {
-  id: { type: Number, required: true, unique: true }, // ✅ unique ID
+  id: { type: Number, required: true, unique: true },
   name: { type: String, required: true },
-  images: [{ type: String, required: true }],
+  images: [{ type: String, required: true }], // Cloudinary URLs
   category: { type: String, required: true },
   new_price: { type: Number, required: true },
   old_price: { type: Number, required: true },
@@ -51,7 +53,6 @@ app.use(
   })
 );
 app.use(express.json());
-app.use("/images", express.static("upload/images"));
 
 // =======================
 // Multer Setup
@@ -68,21 +69,25 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // =======================
+// Cloudinary Config
+// =======================
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.CLOUD_KEY,
+  api_secret: process.env.CLOUD_SECRET,
+});
+
+// =======================
 // JWT Middleware
 // =======================
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
   if (!token)
-    return res
-      .status(401)
-      .json({ success: false, message: "No token provided" });
+    return res.status(401).json({ success: false, message: "No token provided" });
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err)
-      return res
-        .status(403)
-        .json({ success: false, message: "Invalid or expired token" });
+    if (err) return res.status(403).json({ success: false, message: "Invalid token" });
     req.user = user;
     next();
   });
@@ -90,9 +95,7 @@ function authenticateToken(req, res, next) {
 
 function requireAdmin(req, res, next) {
   if (req.user.role !== "admin") {
-    return res
-      .status(403)
-      .json({ success: false, message: "Admin access required" });
+    return res.status(403).json({ success: false, message: "Admin access required" });
   }
   next();
 }
@@ -101,21 +104,25 @@ function requireAdmin(req, res, next) {
 // Routes
 // =======================
 
-// Upload images
-app.post("/upload", upload.array("product", 10), (req, res) => {
-  const BASE_URL =
-    process.env.BASE_URL ||
-    (process.env.NODE_ENV === "production"
-      ? "https://backend-91e3.onrender.com"
-      : `http://localhost:${port}`);
+// Upload images to Cloudinary
+app.post("/upload", upload.array("product", 10), async (req, res) => {
+  try {
+    const imageUrls = [];
 
-  const imageUrls = req.files.map(
-    (file) => `${BASE_URL}/images/${file.filename}`
-  );
-  res.json({ success: 1, image_urls: imageUrls });
+    for (const file of req.files) {
+      const result = await cloudinary.uploader.upload(file.path, { folder: "products" });
+      imageUrls.push(result.secure_url);
+      fs.unlinkSync(file.path); // remove local file
+    }
+
+    res.json({ success: true, image_urls: imageUrls });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Upload failed" });
+  }
 });
 
-// ✅ Add product (IDs start from 7000)
+// Add product
 app.post("/addproduct", async (req, res) => {
   try {
     const lastProduct = await Product.findOne({}).sort({ id: -1 });
@@ -128,7 +135,7 @@ app.post("/addproduct", async (req, res) => {
     const product = new Product({
       id: newId,
       name: req.body.name,
-      images: imagesArray,
+      images: imagesArray, // save Cloudinary URLs
       category: req.body.category,
       new_price: req.body.new_price,
       old_price: req.body.old_price,
@@ -152,7 +159,7 @@ app.post("/removeproduct", async (req, res) => {
   }
 });
 
-// Get all products (sorted newest first)
+// Get all products
 app.get("/allproducts", async (req, res) => {
   try {
     const products = await Product.find({}).sort({ date: -1 });
@@ -167,15 +174,11 @@ app.post("/signup", async (req, res) => {
   try {
     const { username, email, password } = req.body;
     if (!username || !email || !password)
-      return res
-        .status(400)
-        .json({ success: false, message: "All fields are required" });
+      return res.status(400).json({ success: false, message: "All fields are required" });
 
     const existingUser = await User.findOne({ email });
     if (existingUser)
-      return res
-        .status(400)
-        .json({ success: false, message: "Email already exists" });
+      return res.status(400).json({ success: false, message: "Email already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = new User({ username, email, password: hashedPassword });
@@ -191,19 +194,13 @@ app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password)
-      return res
-        .status(400)
-        .json({ success: false, message: "Email and password required" });
+      return res.status(400).json({ success: false, message: "Email and password required" });
 
     const user = await User.findOne({ email });
-    if (!user)
-      return res.status(400).json({ success: false, message: "Invalid email" });
+    if (!user) return res.status(400).json({ success: false, message: "Invalid email" });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid password" });
+    if (!isMatch) return res.status(400).json({ success: false, message: "Invalid password" });
 
     const token = jwt.sign(
       { username: user.username, email: user.email, role: user.role },
@@ -218,92 +215,6 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// ---------------- CART ROUTES ----------------
-
-// ✅ Save cart (normalize keys to strings)
-app.post("/savecart", authenticateToken, async (req, res) => {
-  try {
-    const email = req.user.email;
-    const { cartItems } = req.body;
-
-    const normalizedForDb = {};
-    for (const [k, v] of Object.entries(cartItems || {})) {
-      normalizedForDb[String(k)] = v;
-    }
-
-    await Cart.findOneAndUpdate(
-      { email },
-      { items: normalizedForDb },
-      { upsert: true, new: true }
-    );
-
-    res.json({ success: true, message: "Cart saved successfully" });
-  } catch (err) {
-    console.error(err);
-    res
-      .status(500)
-      .json({ success: false, message: "Error saving cart" });
-  }
-});
-
-// ✅ Get cart (convert Map to plain object)
-app.get("/getcart", authenticateToken, async (req, res) => {
-  try {
-    const email = req.user.email;
-    const userCart = await Cart.findOne({ email });
-
-    let cartObj = {};
-    if (userCart && userCart.items) {
-      if (typeof userCart.items.toObject === "function") {
-        cartObj = userCart.items.toObject();
-      } else {
-        cartObj = Object.fromEntries(userCart.items);
-      }
-    }
-
-    // Convert string keys -> numbers for frontend
-    const normalized = {};
-    for (const [k, v] of Object.entries(cartObj)) {
-      normalized[Number(k)] = v;
-    }
-
-    return res.json({ success: true, cart: normalized });
-  } catch (err) {
-    console.error(err);
-    res
-      .status(500)
-      .json({ success: false, message: "Error loading cart" });
-  }
-});
-
-// ---------------- ADMIN ROUTES ----------------
-app.post("/makeadmin", authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const { email } = req.body;
-    const updated = await User.findOneAndUpdate(
-      { email },
-      { role: "admin" },
-      { new: true }
-    );
-    if (!updated)
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
-
-    res.json({
-      success: true,
-      message: `${email} is now an admin`,
-      user: updated,
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
-
-app.get("/verifyAdmin", authenticateToken, (req, res) => {
-  res.json({ isAdmin: req.user.role === "admin" });
-});
-
 // ---------------- MongoDB ----------------
 mongoose
   .connect(process.env.MONGO_URL)
@@ -311,9 +222,5 @@ mongoose
   .catch((err) => console.error("❌ MongoDB Error:", err.message));
 
 // ---------------- Start Server ----------------
-app.get("/", (req, res) =>
-  res.send("✅ API is running successfully!")
-);
-app.listen(port, () =>
-  console.log(`🚀 Server running on http://localhost:${port}`)
-);
+app.get("/", (req, res) => res.send("✅ API is running successfully!"));
+app.listen(port, () => console.log(`🚀 Server running on http://localhost:${port}`));
