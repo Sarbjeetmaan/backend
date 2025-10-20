@@ -107,6 +107,9 @@ function requireAdmin(req, res, next) {
 // Upload images to Cloudinary
 app.post("/upload", upload.array("product", 10), async (req, res) => {
   try {
+    if (!req.files || req.files.length === 0)
+      return res.status(400).json({ success: false, message: "No files uploaded" });
+
     const imageUrls = [];
 
     for (const file of req.files) {
@@ -117,45 +120,51 @@ app.post("/upload", upload.array("product", 10), async (req, res) => {
 
     res.json({ success: true, image_urls: imageUrls });
   } catch (err) {
-    console.error(err);
+    console.error("Upload Error:", err);
     res.status(500).json({ success: false, message: "Upload failed" });
   }
 });
 
-// Add product
-app.post("/addproduct", async (req, res) => {
+// Add product (admin only)
+app.post("/addproduct", authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const { name, images, category, new_price, old_price } = req.body;
+
+    // Validation
+    if (!name || !images || images.length === 0 || !category || !new_price || !old_price) {
+      return res.status(400).json({ success: false, message: "All product fields are required" });
+    }
+
     const lastProduct = await Product.findOne({}).sort({ id: -1 });
     const newId = lastProduct ? lastProduct.id + 1 : 7000;
 
-    const imagesArray = Array.isArray(req.body.images)
-      ? req.body.images
-      : [req.body.images];
+    const imagesArray = Array.isArray(images) ? images : [images];
 
     const product = new Product({
       id: newId,
-      name: req.body.name,
-      images: imagesArray, // save Cloudinary URLs
-      category: req.body.category,
-      new_price: req.body.new_price,
-      old_price: req.body.old_price,
+      name,
+      images: imagesArray,
+      category,
+      new_price: Number(new_price),
+      old_price: Number(old_price),
     });
 
     await product.save();
     res.json({ success: true, product });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Server Error" });
+    console.error("Add Product Error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// Remove product
-app.post("/removeproduct", async (req, res) => {
+// Remove product (admin only)
+app.post("/removeproduct", authenticateToken, requireAdmin, async (req, res) => {
   try {
     await Product.findOneAndDelete({ id: req.body.id });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false });
+    console.error("Remove Product Error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -165,7 +174,8 @@ app.get("/allproducts", async (req, res) => {
     const products = await Product.find({}).sort({ date: -1 });
     res.json(products);
   } catch (err) {
-    res.status(500).json({ success: false });
+    console.error("Get All Products Error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -185,8 +195,8 @@ app.post("/signup", async (req, res) => {
     await newUser.save();
     res.json({ success: true, message: "User registered successfully" });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false });
+    console.error("Signup Error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -210,8 +220,8 @@ app.post("/login", async (req, res) => {
 
     res.json({ success: true, token, role: user.role });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false });
+    console.error("Login Error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
