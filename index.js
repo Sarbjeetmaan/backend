@@ -36,6 +36,29 @@ const Cart = mongoose.model("cart", {
   email: { type: String, required: true },
   items: { type: Map, of: Number, default: {} },
 });
+ const Order = mongoose.model("order", {
+  userEmail: { type: String, required: true },
+  items: [
+    {
+      productId: { type: mongoose.Schema.Types.ObjectId, ref: "product" },
+      name: String,
+      quantity: Number,
+      price: Number,
+      image: String,
+    },
+  ],
+  totalAmount: { type: Number, required: true },
+  shippingAddress: {
+    name: String,
+    address: String,
+    city: String,
+    state: String,
+    zip: String,
+    phone: String,
+  },
+  status: { type: String, default: "Processing" },
+  createdAt: { type: Date, default: Date.now },
+});
 
 // =======================
 // Middleware
@@ -52,11 +75,13 @@ app.use(
 );
 app.use(express.json());
 
+
 // =======================
 // Multer (memory storage)
 // =======================
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
+
 
 // =======================
 // Cloudinary Config
@@ -175,6 +200,66 @@ app.get("/allproducts", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// =======================
+// PLACE ORDER
+// =======================
+app.post("/placeorder", authenticateToken, async (req, res) => {
+  try {
+    const { items, address } = req.body;
+    const userEmail = req.user.email;
+
+    if (!items || items.length === 0) {
+      return res.status(400).json({ success: false, message: "No items provided" });
+    }
+
+    const totalAmount = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+    const newOrder = new Order({
+      userEmail,
+      items,
+      totalAmount,
+      shippingAddress: address,
+    });
+
+    await newOrder.save();
+    res.json({ success: true, message: "Order placed successfully", order: newOrder });
+  } catch (err) {
+    console.error("Place Order Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+// Get user orders
+app.get("/orders", authenticateToken, async (req, res) => {
+  try {
+    const userEmail = req.user.email;
+    const orders = await Order.find({ userEmail }).sort({ createdAt: -1 });
+    res.json({ success: true, orders });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Get all orders (admin only)
+app.get("/admin/orders", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const orders = await Order.find({}).sort({ createdAt: -1 });
+    res.json({ success: true, orders });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+// Update order status (admin only)
+app.put("/admin/orders/:id", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    await Order.findByIdAndUpdate(id, { status });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 
 // ---------------- AUTH ROUTES ----------------
 app.post("/signup", async (req, res) => {
