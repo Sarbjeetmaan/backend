@@ -282,19 +282,28 @@ app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid payment method" });
     }
 
+    // Determine frontend URL based on environment
+    const FRONTEND_URL =
+      process.env.NODE_ENV === "production"
+        ? process.env.FRONTEND_URL_PROD
+        : process.env.FRONTEND_URL_LOCAL;
+
+    // Validate phone number
+    if (!order.shippingAddress.phone || order.shippingAddress.phone.length !== 10) {
+      return res.status(400).json({ success: false, message: "Invalid phone number" });
+    }
+
     const cashfreeOrderPayload = {
       order_id: order._id.toString(),
-      order_amount: Number(order.totalAmount), // ✅ force number
+      order_amount: Number(order.totalAmount).toFixed(2), // string with 2 decimals
       order_currency: "INR",
-
       customer_details: {
         customer_id: order.userEmail,
         customer_email: order.userEmail,
         customer_phone: order.shippingAddress.phone,
       },
-
       order_meta: {
-        return_url: `${process.env.FRONTEND_URL}/payment-success?order_id={order_id}`,
+        return_url: `${FRONTEND_URL}/payment-success?order_id=${order._id}`,
       },
     };
 
@@ -311,6 +320,7 @@ app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Cashfree order creation failed" });
   }
 });
+
 
 //payemt verification
 app.post("/verify-payment", authenticateToken, async (req, res) => {
