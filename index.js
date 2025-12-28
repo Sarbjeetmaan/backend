@@ -10,6 +10,18 @@ const cloudinary = require("cloudinary").v2;
 const app = express();
 const port = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET;
+const axios = require("axios");
+
+const cashfreeAxios = axios.create({
+  baseURL: process.env.CASHFREE_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+    "x-client-id": process.env.CASHFREE_APP_ID,
+    "x-client-secret": process.env.CASHFREE_SECRET_KEY,
+    "x-api-version": "2022-09-01",
+  },
+});
+
 
 // =======================
 // MongoDB Models
@@ -36,7 +48,7 @@ const Cart = mongoose.model("cart", {
   email: { type: String, required: true },
   items: { type: Map, of: Number, default: {} },
 });
- const Order = mongoose.model("order", {
+const Order = mongoose.model("order", {
   userEmail: { type: String, required: true },
   items: [
     {
@@ -56,9 +68,20 @@ const Cart = mongoose.model("cart", {
     zip: String,
     phone: String,
   },
+  paymentMethod: {
+    type: String,
+    enum: ["COD", "ONLINE"],
+    required: true,
+  },
+  paymentStatus: {
+    type: String,
+    enum: ["PENDING", "PAID"],
+    default: "PENDING",
+  },
   status: { type: String, default: "Processing" },
   createdAt: { type: Date, default: Date.now },
 });
+
 
 // =======================
 // Middleware
@@ -205,29 +228,116 @@ app.get("/allproducts", async (req, res) => {
 // =======================
 app.post("/placeorder", authenticateToken, async (req, res) => {
   try {
-    const { items, address } = req.body;
+    const { items, address, paymentMethod } = req.body;
     const userEmail = req.user.email;
 
     if (!items || items.length === 0) {
       return res.status(400).json({ success: false, message: "No items provided" });
     }
 
-    const totalAmount = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    if (!paymentMethod) {
+      return res.status(400).json({ success: false, message: "Payment method required" });
+    }
+
+    const totalAmount = items.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    );
 
     const newOrder = new Order({
       userEmail,
       items,
       totalAmount,
       shippingAddress: address,
+      paymentMethod,
+      paymentStatus: paymentMethod === "COD" ? "PENDING" : "PENDING",
     });
 
     await newOrder.save();
-    res.json({ success: true, message: "Order placed successfully", order: newOrder });
+
+    res.json({
+      success: true,
+      message:
+        paymentMethod === "COD"
+          ? "Order placed with Cash on Delivery"
+          : "Order created. Proceed to online payment",
+      order: newOrder,
+    });
   } catch (err) {
     console.error("Place Order Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+//cashfre  
+app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
+  try {
+    const { orderId } = req.body;
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    if (order.paymentMethod !== "ONLINE") {
+      return res.status(400).json({ success: false, message: "Invalid payment method" });
+    }
+
+    const cashfreeOrderPayload = {
+      order_id: order._id.toString(),
+      order_amount: Number(order.totalAmount), // ✅ force number
+      order_currency: "INR",
+
+      customer_details: {
+        customer_id: order.userEmail,
+        customer_email: order.userEmail,
+        customer_phone: order.shippingAddress.phone,
+      },
+
+      order_meta: {
+        return_url: `${process.env.FRONTEND_URL}/payment-success?order_id={order_id}`,
+      },
+    };
+
+    const response = await cashfreeAxios.post("/orders", cashfreeOrderPayload);
+
+    res.json({
+      success: true,
+      payment_session_id: response.data.payment_session_id,
+      order_id: response.data.order_id,
+    });
+
+  } catch (err) {
+    console.error("Cashfree Order Error:", err.response?.data || err.message);
+    res.status(500).json({ success: false, message: "Cashfree order creation failed" });
+  }
+});
+
+//payemt verification
+app.post("/verify-payment", authenticateToken, async (req, res) => {
+  try {
+    const { orderId } = req.body;
+
+    const response = await cashfreeAxios.get(`/orders/${orderId}`);
+    const paymentStatus = response.data.order_status;
+
+    if (paymentStatus === "PAID") {
+      await Order.findByIdAndUpdate(orderId, {
+        paymentStatus: "PAID",
+        status: "Confirmed",
+      });
+
+      return res.json({ success: true, message: "Payment verified" });
+    }
+
+    res.json({ success: false, message: "Payment not completed" });
+
+  } catch (err) {
+    console.error("Verify Payment Error:", err.response?.data || err.message);
+    res.status(500).json({ success: false, message: "Payment verification failed" });
+  }
+});
+
+
 // Get user orders
 app.get("/orders", authenticateToken, async (req, res) => {
   try {
