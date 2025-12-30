@@ -294,10 +294,11 @@ app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
       order_amount: Number(order.totalAmount).toFixed(2),
       order_currency: "INR",
       customer_details: {
-        customer_id: order.userEmail,
-        customer_email: order.userEmail,
-        customer_phone: order.shippingAddress.phone,
-      },
+  customer_id: `user_${order._id}`, 
+  customer_email: order.userEmail,
+  customer_phone: order.shippingAddress.phone,
+},
+
       order_meta: {
         return_url: `${FRONTEND_URL}/payment-success?order_id=${order._id}`,
       },
