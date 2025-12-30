@@ -283,7 +283,7 @@ app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid payment method" });
     }
 
-    const FRONTEND_URL = process.env.FRONTEND_URL_LOCAL;
+    const FRONTEND_URL = process.env.FRONTEND_URL;
 
     if (!order.shippingAddress.phone || order.shippingAddress.phone.length !== 10) {
       return res.status(400).json({ success: false, message: "Invalid phone number" });
