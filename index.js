@@ -321,9 +321,16 @@ app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Cashfree Order Error:", err.response?.data || err.message);
-    res.status(500).json({ success: false, message: "Cashfree order creation failed" });
-  }
+  console.error("🔥 CASHFREE ERROR STATUS:", err.response?.status);
+  console.error("🔥 CASHFREE ERROR DATA:", JSON.stringify(err.response?.data, null, 2));
+  console.error("🔥 CASHFREE MESSAGE:", err.message);
+
+  return res.status(500).json({
+    success: false,
+    cashfreeError: err.response?.data,
+  });
+}
+
 });
 
 
