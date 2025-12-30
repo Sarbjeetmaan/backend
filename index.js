@@ -12,13 +12,13 @@ const port = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET;
 const axios = require("axios");
 
-const cashfreeAxios = axios.create({
-  baseURL: process.env.CASHFREE_BASE_URL,
+const pgAxios = axios.create({
+  baseURL: "https://sandbox.cashfree.com/pg",
   headers: {
     "Content-Type": "application/json",
     "x-client-id": process.env.CASHFREE_APP_ID,
     "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-    "x-api-version": "2022-09-01",
+    "x-api-version": "2023-08-01",
   },
 });
 
@@ -269,6 +269,7 @@ app.post("/placeorder", authenticateToken, async (req, res) => {
   }
 });
 //cashfre  
+
 app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
   try {
     const { orderId } = req.body;
@@ -282,20 +283,15 @@ app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid payment method" });
     }
 
-    // Determine frontend URL based on environment
-    const FRONTEND_URL =
-      process.env.NODE_ENV === "production"
-        ? process.env.FRONTEND_URL_PROD
-        : process.env.FRONTEND_URL_LOCAL;
+    const FRONTEND_URL = process.env.FRONTEND_URL_LOCAL;
 
-    // Validate phone number
     if (!order.shippingAddress.phone || order.shippingAddress.phone.length !== 10) {
       return res.status(400).json({ success: false, message: "Invalid phone number" });
     }
 
-    const cashfreeOrderPayload = {
+    const payload = {
       order_id: order._id.toString(),
-      order_amount: Number(order.totalAmount).toFixed(2), // string with 2 decimals
+      order_amount: Number(order.totalAmount).toFixed(2),
       order_currency: "INR",
       customer_details: {
         customer_id: order.userEmail,
@@ -307,12 +303,21 @@ app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
       },
     };
 
-    const response = await cashfreeAxios.post("/orders", cashfreeOrderPayload);
+    // ✅ CORRECT PG CALL
+    const cfRes = await pgAxios.post("/checkout/orders", payload);
+
+    if (!cfRes.data?.payment_session_id) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to create Cashfree payment session",
+        raw: cfRes.data,
+      });
+    }
 
     res.json({
       success: true,
-      payment_session_id: response.data.payment_session_id,
-      order_id: response.data.order_id,
+      payment_session_id: cfRes.data.payment_session_id,
+      order_id: cfRes.data.order_id,
     });
 
   } catch (err) {
@@ -322,12 +327,14 @@ app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
 });
 
 
+
+
 //payemt verification
 app.post("/verify-payment", authenticateToken, async (req, res) => {
   try {
     const { orderId } = req.body;
 
-    const response = await cashfreeAxios.get(`/orders/${orderId}`);
+    const response = await pgAxios.get(`/orders/${orderId}`);
     const paymentStatus = response.data.order_status;
 
     if (paymentStatus === "PAID") {
@@ -335,15 +342,13 @@ app.post("/verify-payment", authenticateToken, async (req, res) => {
         paymentStatus: "PAID",
         status: "Confirmed",
       });
-
-      return res.json({ success: true, message: "Payment verified" });
+      return res.json({ success: true });
     }
 
-    res.json({ success: false, message: "Payment not completed" });
-
+    res.json({ success: false });
   } catch (err) {
-    console.error("Verify Payment Error:", err.response?.data || err.message);
-    res.status(500).json({ success: false, message: "Payment verification failed" });
+    console.error("Verify Error:", err.response?.data || err.message);
+    res.status(500).json({ success: false });
   }
 });
 
@@ -355,7 +360,7 @@ app.get("/orders", authenticateToken, async (req, res) => {
     const orders = await Order.find({ userEmail }).sort({ createdAt: -1 });
     res.json({ success: true, orders });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: err.message });``
   }
 });
 
