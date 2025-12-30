@@ -304,7 +304,7 @@ app.post("/create-cashfree-order", authenticateToken, async (req, res) => {
     };
 
     // ✅ CORRECT PG CALL
-    const cfRes = await pgAxios.post("/checkout/orders", payload);
+    const cfRes = await pgAxios.post("/orders", payload);
 
     if (!cfRes.data?.payment_session_id) {
       return res.status(500).json({
