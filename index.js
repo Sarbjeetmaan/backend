@@ -81,6 +81,13 @@ const Order = mongoose.model("order", {
   status: { type: String, default: "Processing" },
   createdAt: { type: Date, default: Date.now },
 });
+const Review = mongoose.model("review", {
+  productId: { type: mongoose.Schema.Types.ObjectId, ref: "product", required: true },
+  userEmail: { type: String, required: true },
+  rating: { type: Number, min: 1, max: 5, required: true },
+  comment: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+});
 
 
 // =======================
@@ -223,6 +230,41 @@ app.get("/allproducts", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+//review order
+app.get("/can-review/:productId", authenticateToken, async (req, res) => {
+  const { productId } = req.params;
+  const userEmail = req.user.email;
+
+  const deliveredOrder = await Order.findOne({
+    userEmail,
+    status: "Delivered",
+    "items.productId": productId,
+  });
+
+  res.json({ canReview: !!deliveredOrder });
+});
+app.post("/reviews", authenticateToken, async (req, res) => {
+  const { productId, rating, comment } = req.body;
+  const userEmail = req.user.email;
+
+  // prevent duplicate reviews
+  const alreadyReviewed = await Review.findOne({ productId, userEmail });
+  if (alreadyReviewed) {
+    return res.status(400).json({ message: "You already reviewed this product" });
+  }
+
+  const review = new Review({ productId, userEmail, rating, comment });
+  await review.save();
+
+  res.json({ success: true });
+});
+app.get("/reviews/:productId", async (req, res) => {
+  const reviews = await Review.find({ productId: req.params.productId })
+    .sort({ createdAt: -1 });
+
+  res.json(reviews);
+});
+
 // =======================
 // PLACE ORDER
 // =======================
